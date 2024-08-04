@@ -4,31 +4,31 @@ import (
 	"File_System/p2p"
 	"fmt"
 	"log"
+	"time"
 )
 
 func main() {
 	tcpOpts := p2p.TCPTransportOpts{
-		ListenAddress:  ":4000",
+		ListenAddress:  ":3000",
 		ShakeHandsFunc: p2p.NOPHandshakerFunc,
 		Decoder:        p2p.DefaultDecoder{},
-		OnPeer:         OPD,
+		//TODO: Add a onPeer func
 	}
 	tran := p2p.NewTCPTransport(tcpOpts)
+	fileServerOpts := FileServerOpts{
+		StorageRoot:       "3000_network",
+		PathTransformFunc: CASPathTransformFunc,
+		Transport:         tran,
+	}
+	s := NewFileServer(fileServerOpts)
 
 	go func() {
-		for {
-			msg := <-tran.Consume()
-			fmt.Printf("msg:%v\n", msg)
-		}
+		time.Sleep(time.Second * 3)
+		fmt.Println("sleep over")
+		s.Stop()
 	}()
-	if err := tran.ListenAndAccept(); err != nil {
+
+	if err := s.Start(); err != nil {
 		log.Fatal(err)
 	}
-	select {}
-}
-
-func OPD(p p2p.Peer) error {
-	p.Close()
-	fmt.Println("doing some logic with peer")
-	return nil
 }

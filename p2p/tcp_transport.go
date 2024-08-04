@@ -1,7 +1,9 @@
 package p2p
 
 import (
+	"errors"
 	"fmt"
+	"log"
 	"net"
 )
 
@@ -51,6 +53,11 @@ func (t *TCPTransport) Consume() <-chan RPC {
 	return t.rpcChan
 }
 
+// Close implements the Transport interface.
+func (t *TCPTransport) Close() error {
+	return t.listener.Close()
+}
+
 func (t *TCPTransport) ListenAndAccept() error {
 	var err error
 	t.listener, err = net.Listen("tcp", t.ListenAddress)
@@ -59,17 +66,25 @@ func (t *TCPTransport) ListenAndAccept() error {
 	}
 	//这里开一个协程用于监听端口并且处理连接
 	go t.startAcceptLoop()
+
+	log.Printf("TCP transport listening on port: %s\n", t.ListenAddress)
+
 	return nil
 }
 
 func (t *TCPTransport) startAcceptLoop() {
 	for {
 		accept, err := t.listener.Accept()
+		if errors.Is(err, net.ErrClosed) {
+			return
+		}
+
 		if err != nil {
 			fmt.Printf("TCP accept error:%s\n", err)
 		}
 		// use a new goroutine to handle request
 		// so multiple connections may be served concurrently
+		fmt.Printf("new incoming connection:%+v", accept)
 		go t.handlerConn(accept)
 	}
 }
@@ -84,7 +99,7 @@ func (t *TCPTransport) handlerConn(conn net.Conn) {
 		conn.Close()
 	}()
 	peer := NewTCPPeer(conn, false)
-	fmt.Printf("new incoming connection:%+v", peer)
+
 	if err = t.ShakeHandsFunc(conn); err != nil {
 		return
 	}
