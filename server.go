@@ -11,6 +11,7 @@ type FileServerOpts struct {
 	StorageRoot       string
 	PathTransformFunc PathTransformFunc
 	Transport         p2p.Transport
+	BootstrapNodes    []string
 }
 
 type FileServer struct {
@@ -50,11 +51,23 @@ func (s *FileServer) loop() {
 	}
 }
 
+func (s *FileServer) bootstrapNetwork() error {
+	for _, addr := range s.BootstrapNodes {
+		go func(addr string) {
+			fmt.Println("attemping to connct with remote: ", addr)
+			if err := s.Transport.Dial(addr); err != nil {
+				log.Println("dial error: ", err)
+			}
+		}(addr)
+	}
+	return nil
+}
+
 func (s *FileServer) Start() error {
 	if err := s.Transport.ListenAndAccept(); err != nil {
 		return err
 	}
-
+	s.bootstrapNetwork()
 	s.loop()
 
 	return nil

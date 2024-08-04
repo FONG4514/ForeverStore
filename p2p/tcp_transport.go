@@ -58,6 +58,16 @@ func (t *TCPTransport) Close() error {
 	return t.listener.Close()
 }
 
+// Dial implements the Transport interface.
+func (t *TCPTransport) Dial(addr string) error {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		return err
+	}
+	go t.handlerConn(conn, true)
+	return nil
+}
+
 func (t *TCPTransport) ListenAndAccept() error {
 	var err error
 	t.listener, err = net.Listen("tcp", t.ListenAddress)
@@ -84,21 +94,21 @@ func (t *TCPTransport) startAcceptLoop() {
 		}
 		// use a new goroutine to handle request
 		// so multiple connections may be served concurrently
-		fmt.Printf("new incoming connection:%+v", accept)
-		go t.handlerConn(accept)
+		fmt.Printf("here is %v new incoming connection:%+v", t.ListenAddress, accept)
+		go t.handlerConn(accept, false)
 	}
 }
 
 // Temp是占位符，充当msg
 type Temp struct{}
 
-func (t *TCPTransport) handlerConn(conn net.Conn) {
+func (t *TCPTransport) handlerConn(conn net.Conn, outbound bool) {
 	var err error
 	defer func() {
 		fmt.Printf("dropping peer connection: %s", err)
 		conn.Close()
 	}()
-	peer := NewTCPPeer(conn, false)
+	peer := NewTCPPeer(conn, outbound)
 
 	if err = t.ShakeHandsFunc(conn); err != nil {
 		return
