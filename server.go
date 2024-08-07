@@ -50,7 +50,17 @@ func (s *FileServer) broadcast(p *Payload) error {
 		peers = append(peers, peer)
 	}
 	mw := io.MultiWriter(peers...)
-	return gob.NewEncoder(mw).Encode(p)
+	// 由于GOB写入流神奇的将p分两次写入mw，所以这里先一次性写入buf，再交给mw进行写入
+	buf := new(bytes.Buffer)
+	if err := gob.NewEncoder(buf).Encode(p); err != nil {
+		return err
+	}
+	n, err := mw.Write(buf.Bytes())
+	if err != nil {
+		return err
+	}
+	fmt.Printf("hahahahah print %v bytes to peers", n)
+	return nil
 }
 
 func (s *FileServer) StoreData(key string, r io.Reader) error {
@@ -99,8 +109,6 @@ func (s *FileServer) loop() {
 		case msg := <-s.Transport.Consume():
 			fmt.Printf("received msg:%v\n", msg.Payload)
 			var p Payload
-			/// 这里出EOF(WIN11)是Decode遇到了输入为EOF，造成p没被修改
-			/// 教程在5:00:12修复完，但是我没完成
 			if err := gob.NewDecoder(bytes.NewReader(msg.Payload)).Decode(&p); err != nil {
 				fmt.Printf("this is p:%+v\n", err)
 				log.Fatal(err)
