@@ -128,7 +128,6 @@ func (t *TCPTransport) handlerConn(conn net.Conn, outbound bool) {
 			return
 		}
 		msg.Form = conn.RemoteAddr()
-		fmt.Printf("mmmmsssssggggggr :%s\n", msg)
 		t.rpcChan <- msg
 	}
 }

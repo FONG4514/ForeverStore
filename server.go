@@ -55,18 +55,16 @@ func (s *FileServer) broadcast(p *Payload) error {
 	if err := gob.NewEncoder(buf).Encode(p); err != nil {
 		return err
 	}
-	n, err := mw.Write(buf.Bytes())
+	_, err := mw.Write(buf.Bytes())
 	if err != nil {
 		return err
 	}
-	fmt.Printf("hahahahah print %v bytes to peers", n)
 	return nil
 }
 
 func (s *FileServer) StoreData(key string, r io.Reader) error {
 	//1. Store this file to disk
 	//2. broadcast this file to all known peers in the network
-	fmt.Println("call it StoreData")
 	buf := new(bytes.Buffer)
 	tee := io.TeeReader(r, buf)
 

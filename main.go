@@ -3,7 +3,6 @@ package main
 import (
 	"File_System/p2p"
 	"bytes"
-	"fmt"
 	"log"
 	"time"
 )
@@ -38,7 +37,6 @@ func main() {
 	time.Sleep(2 * time.Second)
 	data := bytes.NewReader([]byte("my big data file here!"))
 
-	err := s2.StoreData("myPrivateData", data)
-	fmt.Printf("this is err:%v", err)
+	s2.StoreData("myPrivateData", data)
 	select {}
 }
