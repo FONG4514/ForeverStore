@@ -9,8 +9,9 @@ import (
 
 // TCPPeer represents the remote node over TCP established connection
 type TCPPeer struct {
-	// 这个是一个与一个peer的底层的连接
-	conn net.Conn
+	// The underlying connection of the peer. Which in this case
+	// is a TCP connection
+	net.Conn
 	// outbound 意味着如果我们主动询问并且建立一条连接，outbound(出境)为true
 	// 否则如果我们accept一次询问并且建立连接，则为false
 	outbound bool
@@ -38,13 +39,14 @@ func NewTCPTransport(opts TCPTransportOpts) *TCPTransport {
 
 func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	return &TCPPeer{
-		conn:     conn,
+		Conn:     conn,
 		outbound: outbound,
 	}
 }
 
-func (p *TCPPeer) Close() error {
-	return p.conn.Close()
+func (p *TCPPeer) Send(b []byte) error {
+	_, err := p.Conn.Write(b)
+	return err
 }
 
 // Consume implements the transport interface,and return read-only channel
@@ -94,12 +96,11 @@ func (t *TCPTransport) startAcceptLoop() {
 		}
 		// use a new goroutine to handle request
 		// so multiple connections may be served concurrently
-		fmt.Printf("here is %v new incoming connection:%+v", t.ListenAddress, accept)
 		go t.handlerConn(accept, false)
 	}
 }
 
-// Temp是占位符，充当msg
+// Temp 是占位符，充当msg
 type Temp struct{}
 
 func (t *TCPTransport) handlerConn(conn net.Conn, outbound bool) {
@@ -110,7 +111,7 @@ func (t *TCPTransport) handlerConn(conn net.Conn, outbound bool) {
 	}()
 	peer := NewTCPPeer(conn, outbound)
 
-	if err = t.ShakeHandsFunc(conn); err != nil {
+	if err = t.ShakeHandsFunc(peer); err != nil {
 		return
 	}
 	if t.OnPeer != nil {
@@ -127,6 +128,7 @@ func (t *TCPTransport) handlerConn(conn net.Conn, outbound bool) {
 			return
 		}
 		msg.Form = conn.RemoteAddr()
+		fmt.Printf("mmmmsssssggggggr :%s\n", msg)
 		t.rpcChan <- msg
 	}
 }

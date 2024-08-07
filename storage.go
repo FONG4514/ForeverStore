@@ -109,6 +109,7 @@ func (s *Store) writeStream(key string, r io.Reader) error {
 
 	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.FullPath())
 	f, err := os.Create(fullPathWithRoot)
+	// 这个Close在视频是没有的，但是在win11 go 1.20.11下需要添加，否则报错
 	defer f.Close()
 	if err != nil {
 		return err
