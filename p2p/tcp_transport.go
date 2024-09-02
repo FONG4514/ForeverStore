@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync"
 )
 
 // TCPPeer represents the remote node over TCP established connection
@@ -15,6 +16,7 @@ type TCPPeer struct {
 	// outbound 意味着如果我们主动询问并且建立一条连接，outbound(出境)为true
 	// 否则如果我们accept一次询问并且建立连接，则为false
 	outbound bool
+	Wg       *sync.WaitGroup
 }
 
 type TCPTransportOpts struct {
@@ -41,6 +43,7 @@ func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	return &TCPPeer{
 		Conn:     conn,
 		outbound: outbound,
+		Wg:       &sync.WaitGroup{},
 	}
 }
 
@@ -48,6 +51,10 @@ func (p *TCPPeer) Send(b []byte) error {
 	_, err := p.Conn.Write(b)
 	return err
 }
+
+/*func (t *TCPTransport) ListenAddr() string {
+	return t.ListenAddress
+}*/
 
 // Consume implements the transport interface,and return read-only channel
 // for reading the incoming messages received form another peer in network
@@ -122,12 +129,19 @@ func (t *TCPTransport) handlerConn(conn net.Conn, outbound bool) {
 	// Read Loop
 	msg := RPC{}
 	for {
+		//在没有广播但是又使用p2p网络的情况下，这个连接会空着，一直在等待流
 		err := t.Decoder.Decode(conn, &msg)
 		if err != nil {
 			fmt.Printf("tcp read error :%s\n", err)
 			return
 		}
-		msg.Form = conn.RemoteAddr()
+
+		msg.Form = conn.RemoteAddr().String()
+		peer.Wg.Add(1)
+		fmt.Println("waiting till stream is done")
 		t.rpcChan <- msg
+		//fmt.Printf("msg:%+v inside\n", msg)
+		peer.Wg.Wait()
+		fmt.Println("stream done continuing normal read loop")
 	}
 }

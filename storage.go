@@ -67,7 +67,7 @@ func (s *Store) Read(key string) (io.Reader, error) {
 	return buf, err
 }
 
-func (s *Store) Write(key string, r io.Reader) error {
+func (s *Store) Write(key string, r io.Reader) (int64, error) {
 	return s.writeStream(key, r)
 }
 
@@ -100,27 +100,27 @@ func (s *Store) readStream(key string) (io.ReadCloser, error) {
 	return os.Open(pathKeyWithRoot)
 }
 
-func (s *Store) writeStream(key string, r io.Reader) error {
+func (s *Store) writeStream(key string, r io.Reader) (int64, error) {
 	pathKey := s.PathTransformFunc(key)
 	pathNameWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.Pathname)
 	if err := os.MkdirAll(pathNameWithRoot, os.ModePerm); err != nil {
-		return err
+		return 0, err
 	}
 
 	fullPathWithRoot := fmt.Sprintf("%s/%s", s.Root, pathKey.FullPath())
 	f, err := os.Create(fullPathWithRoot)
 	// 这个Close在视频是没有的，但是在win11 go 1.20.11下需要添加，否则报错
-	defer f.Close()
+	//defer f.Close()
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	n, err := io.Copy(f, r)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	log.Printf("writen (%d) bytes to disk：%s", n, fullPathWithRoot)
-	return nil
+	return n, nil
 }
 
 func DefaultPathTransform(key string) PathKey {
