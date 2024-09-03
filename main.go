@@ -2,7 +2,8 @@ package main
 
 import (
 	"File_System/p2p"
-	"bytes"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"time"
 )
@@ -35,8 +36,19 @@ func main() {
 	time.Sleep(2 * time.Second)
 	go s2.Start()
 	time.Sleep(2 * time.Second)
-	data := bytes.NewReader([]byte("my big data file here!"))
+	//data := bytes.NewReader([]byte("my big data file here!"))
+	//s2.Store("myPrivateData", data)
 
-	s2.StoreData("myPrivateData", data)
+	r, err := s2.Get("foo")
+	if err != nil {
+		log.Fatal(err)
+	}
+	b, err := ioutil.ReadAll(r)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(string(b))
+
 	select {}
 }
