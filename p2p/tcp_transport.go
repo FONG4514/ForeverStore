@@ -137,11 +137,16 @@ func (t *TCPTransport) handlerConn(conn net.Conn, outbound bool) {
 		}
 
 		msg.Form = conn.RemoteAddr().String()
-		peer.Wg.Add(1)
-		fmt.Println("waiting till stream is done")
+
+		if msg.Stream {
+			peer.Wg.Add(1)
+			fmt.Printf("[%s] incoming stream,waiting till stream is done\n", conn.RemoteAddr())
+			peer.Wg.Wait()
+			fmt.Printf("[%s] stream close,stream done continuing normal read loop\n", conn.RemoteAddr())
+			continue
+		}
+
 		t.rpcChan <- msg
 		//fmt.Printf("msg:%+v inside\n", msg)
-		peer.Wg.Wait()
-		fmt.Println("stream done continuing normal read loop")
 	}
 }
