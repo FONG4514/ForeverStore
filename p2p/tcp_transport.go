@@ -16,7 +16,7 @@ type TCPPeer struct {
 	// outbound 意味着如果我们主动询问并且建立一条连接，outbound(出境)为true
 	// 否则如果我们accept一次询问并且建立连接，则为false
 	outbound bool
-	Wg       *sync.WaitGroup
+	wg       *sync.WaitGroup
 }
 
 type TCPTransportOpts struct {
@@ -35,16 +35,24 @@ type TCPTransport struct {
 func NewTCPTransport(opts TCPTransportOpts) *TCPTransport {
 	return &TCPTransport{
 		TCPTransportOpts: opts,
-		rpcChan:          make(chan RPC),
+		rpcChan:          make(chan RPC, 1024),
 	}
+}
+
+func (t *TCPTransport) Addr() string {
+	return t.ListenAddress
 }
 
 func NewTCPPeer(conn net.Conn, outbound bool) *TCPPeer {
 	return &TCPPeer{
 		Conn:     conn,
 		outbound: outbound,
-		Wg:       &sync.WaitGroup{},
+		wg:       &sync.WaitGroup{},
 	}
+}
+
+func (p *TCPPeer) CloseStream() {
+	p.wg.Done()
 }
 
 func (p *TCPPeer) Send(b []byte) error {
@@ -127,8 +135,9 @@ func (t *TCPTransport) handlerConn(conn net.Conn, outbound bool) {
 		}
 	}
 	// Read Loop
-	msg := RPC{}
+
 	for {
+		msg := RPC{}
 		//在没有广播但是又使用p2p网络的情况下，这个连接会空着，一直在等待流
 		err := t.Decoder.Decode(conn, &msg)
 		if err != nil {
@@ -139,14 +148,13 @@ func (t *TCPTransport) handlerConn(conn net.Conn, outbound bool) {
 		msg.Form = conn.RemoteAddr().String()
 
 		if msg.Stream {
-			peer.Wg.Add(1)
-			fmt.Printf("[%s] incoming stream,waiting till stream is done\n", conn.RemoteAddr())
-			peer.Wg.Wait()
-			fmt.Printf("[%s] stream close,stream done continuing normal read loop\n", conn.RemoteAddr())
+			peer.wg.Add(1)
+			fmt.Printf("-------------[%s] incoming stream,waiting till stream is done---------\n", conn.RemoteAddr())
+			peer.wg.Wait()
+			fmt.Printf("-------------[%s] stream close,stream done continuing normal read loop---------\n", conn.RemoteAddr())
 			continue
 		}
 
 		t.rpcChan <- msg
-		//fmt.Printf("msg:%+v inside\n", msg)
 	}
 }

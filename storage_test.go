@@ -16,13 +16,13 @@ func TestNewStore(t *testing.T) {
 		key := fmt.Sprintf("test_%d", i)
 		data := []byte("some bytes")
 		log.Printf("this is %d times", i+1)
-		if err := s.writeStream(key, bytes.NewReader(data)); err != nil {
+		if _, err := s.writeStream(key, bytes.NewReader(data)); err != nil {
 			t.Error(err)
 		}
 		if ok := s.Has(key); !ok {
 			t.Errorf("damn!!!")
 		}
-		r, err := s.Read(key)
+		_, r, err := s.Read(key)
 		if err != nil {
 			t.Error(err)
 		}
@@ -55,7 +55,7 @@ func TestDelete(t *testing.T) {
 	key := "FileData"
 	data := []byte("some bytes")
 
-	if err := s.writeStream(key, bytes.NewReader(data)); err != nil {
+	if _, err := s.writeStream(key, bytes.NewReader(data)); err != nil {
 		t.Error(err)
 	}
 	if err := s.Delete(key); err != nil {
