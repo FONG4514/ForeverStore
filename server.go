@@ -13,6 +13,10 @@ import (
 )
 
 type FileServerOpts struct {
+	// ID of the owner of the storage, which will be used to store all files at that location
+	// so we can sync all the files if needed.
+	ID                string
+	EnKey             []byte
 	ListenAddr        string
 	StorageRoot       string
 	PathTransformFunc PathTransformFunc
@@ -30,6 +34,9 @@ type FileServer struct {
 }
 
 func NewFileServer(opts FileServerOpts) *FileServer {
+	if len(opts.ID) == 0 {
+		opts.ID = generateID()
+	}
 	return &FileServer{
 		store: NewStore(StoreOpts{
 			Root:              opts.StorageRoot,
@@ -47,8 +54,14 @@ type Message struct {
 }
 
 type MessageStoreFile struct {
+	ID   string
 	Key  string
 	Size int64
+}
+
+type MessageGetFile struct {
+	ID  string
+	Key string
 }
 
 /*type DataMessage struct {
@@ -56,23 +69,23 @@ type MessageStoreFile struct {
 	Data []byte
 }*/
 
-func (s *FileServer) stream(msg *Message) error {
-	peers := []io.Writer{}
-	for _, peer := range s.peers {
-		peers = append(peers, peer)
-	}
-	mw := io.MultiWriter(peers...)
-	// 由于GOB写入流神奇的将p分两次写入mw，所以这里先一次性写入buf，再交给mw进行写入
-	buf := new(bytes.Buffer)
-	if err := gob.NewEncoder(buf).Encode(msg); err != nil {
-		return err
-	}
-	_, err := mw.Write(buf.Bytes())
-	if err != nil {
-		return err
-	}
-	return nil
-}
+//func (s *FileServer) stream(msg *Message) error {
+//	peers := []io.Writer{}
+//	for _, peer := range s.peers {
+//		peers = append(peers, peer)
+//	}
+//	mw := io.MultiWriter(peers...)
+//	// 由于GOB写入流神奇的将p分两次写入mw，所以这里先一次性写入buf，再交给mw进行写入
+//	buf := new(bytes.Buffer)
+//	if err := gob.NewEncoder(buf).Encode(msg); err != nil {
+//		return err
+//	}
+//	_, err := mw.Write(buf.Bytes())
+//	if err != nil {
+//		return err
+//	}
+//	return nil
+//}
 
 func (s *FileServer) broadcast(msg *Message) error {
 	buf := new(bytes.Buffer)
@@ -91,19 +104,15 @@ func (s *FileServer) broadcast(msg *Message) error {
 	return nil
 }
 
-type MessageGetFile struct {
-	Key string
-}
-
 func (s *FileServer) Get(key string) (io.Reader, error) {
-	if s.store.Has(key) {
+	if s.store.Has(s.ID, key) {
 		fmt.Printf("[%s] serving file (%s) from local disk\n", s.Transport.Addr(), key)
-		_, reader, err := s.store.Read(key)
+		_, reader, err := s.store.Read(s.ID, key)
 		return reader, err
 	}
 	fmt.Printf("[%s],dont have file (%s) locally,fetching from network...\n", s.Transport.Addr(), key)
 
-	msg := Message{Payload: MessageGetFile{Key: key}}
+	msg := Message{Payload: MessageGetFile{Key: hashKey(key), ID: s.ID}}
 
 	if err := s.broadcast(&msg); err != nil {
 		return nil, err
@@ -116,7 +125,9 @@ func (s *FileServer) Get(key string) (io.Reader, error) {
 		//form the connection,so it will not keeping hanging
 		var fileSizes int64
 		binary.Read(peer, binary.LittleEndian, &fileSizes)
-		n, err := s.store.Write(key, io.LimitReader(peer, fileSizes))
+
+		n, err := s.store.WriteDecrypt(s.EnKey, s.ID, key, io.LimitReader(peer, fileSizes))
+
 		if err != nil {
 			return nil, err
 		}
@@ -126,7 +137,7 @@ func (s *FileServer) Get(key string) (io.Reader, error) {
 		peer.CloseStream()
 	}
 
-	_, reader, err := s.store.Read(key)
+	_, reader, err := s.store.Read(s.ID, key)
 	return reader, err
 }
 
@@ -137,13 +148,13 @@ func (s *FileServer) Store(key string, r io.Reader) error {
 		fileBuffer = new(bytes.Buffer)
 		tee        = io.TeeReader(r, fileBuffer)
 	)
-	size, err := s.store.Write(key, tee)
+	size, err := s.store.Write(s.ID, key, tee)
 
 	if err != nil {
 		return err
 	}
 	msg := Message{
-		Payload: MessageStoreFile{Key: key, Size: size},
+		Payload: MessageStoreFile{Key: hashKey(key), Size: size + 16, ID: s.ID},
 	}
 
 	if err := s.broadcast(&msg); err != nil {
@@ -152,16 +163,19 @@ func (s *FileServer) Store(key string, r io.Reader) error {
 
 	time.Sleep(time.Millisecond * 5)
 
-	//TODO use a multiWriter here
+	peers := []io.Writer{}
+
 	for _, peer := range s.peers {
-		peer.Send([]byte{p2p.IncomingStream})
-		written, err := io.Copy(peer, fileBuffer)
-		if err != nil {
-			return err
-		}
-		fmt.Println("received and written bytes to disk : ", written)
+		peers = append(peers, peer)
+	}
+	mw := io.MultiWriter(peers...)
+	mw.Write([]byte{p2p.IncomingStream})
+	n, err := copyEncrypt(s.EnKey, fileBuffer, mw)
+	if err != nil {
+		return err
 	}
 
+	fmt.Printf("[%s] received and written %d bytes to disk\n", s.Transport.Addr(), n)
 	return nil
 
 }
@@ -214,23 +228,22 @@ func (s *FileServer) handleMessage(from string, msg *Message) error {
 }
 
 func (s *FileServer) handlerMessageGetFile(from string, msg MessageGetFile) error {
-	if !s.store.Has(msg.Key) {
+	if !s.store.Has(msg.ID, msg.Key) {
 		return fmt.Errorf("[%s] cannot read file (%s) from disk,maybe it not exist on disk", s.Transport.Addr(), msg.Key)
 	}
 	fmt.Printf("[%s] serving file (%s)  over the network\n", s.Transport.Addr(), msg.Key)
-	fileSize, r, err := s.store.Read(msg.Key)
+	fileSize, r, err := s.store.Read(msg.ID, msg.Key)
 	if err != nil {
 		return err
 	}
 
-	closer, ok := r.(io.ReadCloser)
-	if ok {
+	if closer, ok := r.(io.ReadCloser); ok {
 		fmt.Println("Closing closeStream")
 		defer closer.Close()
 	}
 
-	peer, ok := s.peers[from]
-	if !ok {
+	peer, ok2 := s.peers[from]
+	if !ok2 {
 		return fmt.Errorf("peer %s not in map", from)
 	}
 
@@ -254,11 +267,10 @@ func (s *FileServer) handlerMessageStoreFile(from string, msg MessageStoreFile) 
 	if !ok {
 		return fmt.Errorf("peer (%s) could not be found in the peers", from)
 	}
-	n, err := s.store.Write(msg.Key, io.LimitReader(peer, msg.Size))
+	n, err := s.store.Write(msg.ID, msg.Key, io.LimitReader(peer, msg.Size))
 	if err != nil {
 		return err
 	}
-
 	fmt.Printf("[%s] writtem %v bytes to disk by handlerMessageStoreFile\n", s.Transport.Addr(), n)
 
 	peer.CloseStream()
@@ -271,9 +283,9 @@ func (s *FileServer) bootstrapNetwork() error {
 			continue
 		}
 		go func(addr string) {
-			fmt.Println("attempting to connect with remote: ", addr)
+			fmt.Printf("[%s] attempting to connect with remote %s\n", s.Transport.Addr(), addr)
 			if err := s.Transport.Dial(addr); err != nil {
-				log.Println("dial error: ", err)
+				log.Printf("[%s] dial error: %s\n", s.Transport.Addr(), err.Error())
 			}
 		}(addr)
 	}
@@ -281,6 +293,7 @@ func (s *FileServer) bootstrapNetwork() error {
 }
 
 func (s *FileServer) Start() error {
+	fmt.Printf("[%s] starting fileserver ... \n", s.Transport.Addr())
 	if err := s.Transport.ListenAndAccept(); err != nil {
 		return err
 	}
